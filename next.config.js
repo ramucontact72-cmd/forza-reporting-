@@ -2,7 +2,10 @@
 const nextConfig = {
   output: "standalone",
   reactStrictMode: false,
-  experimental: { optimizePackageImports: ["antd", "@ant-design/icons"] },
+  experimental: {
+    serverComponentsExternalPackages: ["mongodb"],
+    optimizePackageImports: ["antd", "@ant-design/icons"],
+  },
 };
 
 module.exports = nextConfig;

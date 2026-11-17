@@ -1,9 +1,31 @@
+import dayjs from "dayjs";
+import customParseFormat from "dayjs/plugin/customParseFormat";
+import timezone from "dayjs/plugin/timezone";
+import utc from "dayjs/plugin/utc";
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(customParseFormat);
+
 function reportUrl() {
-  return process.env.MEDIANET_REPORT_URL || "https://api-pubconsole.media.net/v2/reports";
+  const configured = process.env.MEDIANET_REPORT_URL || "";
+  if (!configured || configured.endsWith("/v2/reports")) {
+    return "https://api-pubconsole.media.net/v2/reports/hourly-channel-wise";
+  }
+  return configured;
 }
 
 function yyyymmdd(day) {
   return day.replaceAll("-", "");
+}
+
+function clockOf(rawDate) {
+  const raw = String(rawDate || "").trim();
+  const zone = process.env.MEDIANET_TIMEZONE || "UTC";
+  const parsed = dayjs.tz(raw, ["YYYY-MM-DD HH:mm:ss", "YYYY-MM-DDTHH:mm:ss"], zone);
+  if (!parsed.isValid()) return { day: raw.slice(0, 10), hour: "", clockZone: "" };
+  const utcTime = parsed.tz("UTC");
+  return { day: utcTime.format("YYYY-MM-DD"), hour: utcTime.format("HH:mm"), clockZone: "UTC" };
 }
 
 function money(value) {
@@ -49,29 +71,28 @@ export async function pullMediaNet(startDate, endDate) {
       body: JSON.stringify({
         start_date: yyyymmdd(startDate),
         end_date: yyyymmdd(endDate),
-        group_by: ["date", "channel", "channel_name2", "channel_name3"],
         pagination: { page_size: 5000, page_no: pageNo },
       }),
     });
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const message = body?.message || body?.error || "";
-      if (response.status === 429 || /too many/i.test(String(message))) {
+      const raw = body?.message || body?.error || "";
+      const detail = typeof raw === "string" ? raw : JSON.stringify(raw);
+      if (response.status === 429 || /too many/i.test(detail)) {
         throw new Error("Too Many Attempts");
       }
-      throw new Error(message || "Media.net report failed");
+      throw new Error(detail || `Media.net report failed (${response.status})`);
     }
     const pageRows = body?.data?.rows || [];
     total = Number(body?.data?.pagination?.total_rows ?? pageRows.length);
     if (pageRows.length === 0) break;
 
     for (const item of pageRows) {
-      const rawDate = String(item.date || "");
-      const day = rawDate.slice(0, 10);
-      const hour = rawDate.length >= 19 ? rawDate.slice(11, 19) : "";
+      const clock = clockOf(item.date);
       rows.push({
-        day,
-        hour,
+        day: clock.day,
+        hour: clock.hour,
+        clockZone: clock.clockZone,
         channelName: String(item.channelName ?? item.channel ?? ""),
         channelName2: String(item.channelName2 ?? ""),
         channelName3: String(item.channelName3 ?? ""),

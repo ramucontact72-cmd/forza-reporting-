@@ -16,7 +16,6 @@ export async function GET(request) {
       adId: searchParams.get("adId") || "",
       timeZone: searchParams.get("timeZone") || "",
       accountId: searchParams.get("accountId") || "",
-      fresh: searchParams.get("fresh") === "1",
     });
     return NextResponse.json(result);
   } catch (error) {

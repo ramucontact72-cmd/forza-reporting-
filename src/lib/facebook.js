@@ -96,6 +96,11 @@ export async function accountDirectory() {
   return accountCache;
 }
 
+export function cachedDirectory() {
+  if (!accountCache.accounts.length || Date.now() - accountCache.at >= 30 * 60 * 1000) return null;
+  return accountCache;
+}
+
 export async function campaignTimeZones() {
   return (await accountDirectory()).zones;
 }

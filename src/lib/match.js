@@ -81,6 +81,7 @@ export function buildStats(spendRows, revenueRows) {
       spend: row.spend,
       spendImpressions: row.spendImpressions,
       spendClicks: row.spendClicks,
+      clockZone: row.clockZone || "",
       revenue: 0,
       revenueImpressions: 0,
       revenueClicks: 0,
@@ -100,6 +101,7 @@ export function buildStats(spendRows, revenueRows) {
       revenue: row.revenue,
       revenueImpressions: row.revenueImpressions,
       revenueClicks: row.revenueClicks,
+      clockZone: row.clockZone || "UTC",
     });
   }
 

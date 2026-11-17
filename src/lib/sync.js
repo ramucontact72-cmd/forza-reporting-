@@ -2,8 +2,8 @@ import dayjs from "dayjs";
 import customParseFormat from "dayjs/plugin/customParseFormat";
 import utc from "dayjs/plugin/utc";
 import timezone from "dayjs/plugin/timezone";
-import { accountDirectory, pullFacebook } from "./facebook";
-import { overlayLive } from "./live";
+import { readDirectory, writeDirectory } from "./directory";
+import { pullFacebook } from "./facebook";
 import { buildStats } from "./match";
 import { pullMediaNet } from "./medianet";
 import { getDb } from "./mongo";
@@ -32,10 +32,15 @@ export function assertRange(startDate, endDate) {
 
 export async function syncRange(startDate, endDate) {
   assertRange(startDate, endDate);
-  const [spendRows, revenueRows] = await Promise.all([
+  const [spendRows, revenueRows, directory] = await Promise.all([
     pullFacebook(startDate, endDate),
     pullMediaNet(startDate, endDate),
+    writeDirectory(),
   ]);
+  const zoneByAccount = new Map((directory?.accounts || []).map((account) => [String(account.id), account.zone]));
+  for (const row of spendRows) {
+    row.clockZone = zoneByAccount.get(String(row.accountId || "")) || "";
+  }
   const docs = buildStats(spendRows, revenueRows).map((doc) => ({
     ...doc,
     updatedAt: new Date(),
@@ -71,7 +76,7 @@ function shiftClock(day, hour, fromZone, toZone) {
   return { day: next.format("YYYY-MM-DD"), hour: next.format("HH:mm") };
 }
 
-export async function readStats({ startDate, endDate, group, campaignId, adSetId, adId, timeZone, accountId, fresh }) {
+export async function readStats({ startDate, endDate, group, campaignId, adSetId, adId, timeZone, accountId }) {
   assertRange(startDate, endDate);
   const groupKey = GROUPS.has(group) ? group : "campaign";
   const zone = normalizeZone(timeZone);
@@ -83,16 +88,9 @@ export async function readStats({ startDate, endDate, group, campaignId, adSetId
   if (groupKey === "adset") match.adSetId = adSetId || { $nin: ["", null] };
   if (groupKey === "hour") match.hour = { $nin: ["", null] };
 
-  let zones = new Map();
-  let accountByCampaign = new Map();
-  try {
-    const directory = await accountDirectory();
-    zones = directory.zones;
-    accountByCampaign = directory.accountByCampaign;
-  } catch {
-    zones = new Map();
-    accountByCampaign = new Map();
-  }
+  const directory = await readDirectory();
+  const zones = directory.zones;
+  const accountByCampaign = directory.accountByCampaign;
 
   const db = await getDb();
   const docs = await db
@@ -113,29 +111,21 @@ export async function readStats({ startDate, endDate, group, campaignId, adSetId
       spendClicks: 1,
       revenueImpressions: 1,
       revenueClicks: 1,
+      clockZone: 1,
     })
     .toArray();
 
-  const live = await overlayLive(docs, {
-    startDate,
-    endDate,
-    timeZone: zone,
-    fresh,
-    campaignId,
-    adSetId,
-    adId,
-    groupKey,
-  });
   const source = accountId
-    ? live.docs.filter((doc) => accountByCampaign.get(String(doc.campaignId || "")) === accountId)
-    : live.docs;
+    ? docs.filter((doc) => accountByCampaign.get(String(doc.campaignId || "")) === accountId)
+    : docs;
 
   const grouped = new Map();
   for (const doc of source) {
     let day = String(doc.day || "");
     let hour = String(doc.hour || "");
     if (hour) {
-      const shifted = shiftClock(day, hour, zones.get(String(doc.campaignId || "")), zone);
+      const fromZone = doc.clockZone || zones.get(String(doc.campaignId || ""));
+      const shifted = shiftClock(day, hour, fromZone, zone);
       day = shifted.day;
       hour = shifted.hour;
     }
@@ -218,7 +208,12 @@ export async function readStats({ startDate, endDate, group, campaignId, adSetId
     if (groupKey === "hour" || groupKey === "day") return String(a.name).localeCompare(String(b.name));
     return b.spend - a.spend || b.revenue - a.revenue;
   });
-  return { rows: rows.slice(0, 500), live: live.live, liveError: live.liveError };
+  const today = dayjs().tz(zone).format("YYYY-MM-DD");
+  return {
+    rows: rows.slice(0, 500),
+    live: startDate <= today && endDate >= today,
+    liveError: "",
+  };
 }
 
 function round(value) {

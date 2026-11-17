@@ -140,13 +140,11 @@ export function ReportPane({ tab, onChange }) {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState("");
-  const [live, setLive] = useState(false);
   const [liveError, setLiveError] = useState("");
   const [accounts, setAccounts] = useState([]);
   const [nameWidth, setNameWidth] = useState(320);
   const [history, setHistory] = useState(null);
   const [historyTab, setHistoryTab] = useState("hourly");
-  const [historyRanges, setHistoryRanges] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -176,7 +174,6 @@ export function ReportPane({ tab, onChange }) {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Could not load stats");
       setError("");
-      setLive(Boolean(body.live));
       setLiveError(body.liveError || "");
       setRows(body.rows || []);
     } catch (loadError) {
@@ -207,8 +204,8 @@ export function ReportPane({ tab, onChange }) {
   }, []);
 
   useEffect(() => {
-    if (!history || !historyRanges) return undefined;
-    const [start, end] = historyRanges[historyTab];
+    if (!history) return undefined;
+    const [start, end] = range;
     const params = new URLSearchParams({
       startDate: start.format("YYYY-MM-DD"),
       endDate: end.format("YYYY-MM-DD"),
@@ -243,9 +240,10 @@ export function ReportPane({ tab, onChange }) {
     return () => {
       cancelled = true;
     };
-  }, [history, historyTab, historyRanges, tab.timeZone, tab.accountId]);
+  }, [history, historyTab, range, tab.timeZone, tab.accountId]);
 
   async function sync() {
+    if (syncing) return;
     const [start, end] = range;
     setSyncing(true);
     try {
@@ -301,23 +299,12 @@ export function ReportPane({ tab, onChange }) {
   function openHistory(row) {
     setHistoryTab("hourly");
     setHistoryRows([]);
-    setHistoryRanges({
-      hourly: [range[0], range[1]],
-      ads: [range[0], range[1]],
-    });
     setHistory({
       name: row.name || row.id,
       campaignId: row.campaignId,
       adSetId: group === "campaign" ? "" : row.adSetId,
       adId: group === "ad" ? row.adId : "",
       adsAdSetId: group === "campaign" ? "" : row.adSetId,
-    });
-  }
-
-  function shiftHistory(amount) {
-    setHistoryRanges((current) => {
-      const [start, end] = current[historyTab];
-      return { ...current, [historyTab]: [start.add(amount, "day"), end.add(amount, "day")] };
     });
   }
 
@@ -602,9 +589,8 @@ export function ReportPane({ tab, onChange }) {
           popupMatchSelectWidth={false}
           onChange={(timeZone) => onChange({ timeZone })}
         />
-        {live && <span className="live-pill">Live</span>}
-        <Tooltip title="Refresh">
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => load(true)} />
+        <Tooltip title="Reload the saved rows">
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => load()} />
         </Tooltip>
         <Button type="primary" icon={<DownloadOutlined />} loading={syncing} onClick={sync}>
           Pull and save
@@ -700,24 +686,17 @@ export function ReportPane({ tab, onChange }) {
           />
           <Space.Compact>
             <Tooltip title="Previous day">
-              <Button icon={<LeftOutlined />} onClick={() => shiftHistory(-1)} />
+              <Button icon={<LeftOutlined />} onClick={() => shiftDay(-1)} />
             </Tooltip>
-            <RangePicker
-              value={historyRanges?.[historyTab]}
-              allowClear={false}
-              onChange={(next) => {
-                if (!next) return;
-                setHistoryRanges((current) => ({ ...current, [historyTab]: next }));
-              }}
-            />
+            <RangePicker value={range} allowClear={false} onChange={(next) => next && onChange({ range: next })} />
             <Tooltip title="Next day">
-              <Button icon={<RightOutlined />} onClick={() => shiftHistory(1)} />
+              <Button icon={<RightOutlined />} onClick={() => shiftDay(1)} />
             </Tooltip>
           </Space.Compact>
         </div>
         {historyTab === "hourly" && (
           <p className="history-note">
-            Hours follow the time zone you pick. Spend is stored on each ad account&apos;s clock. Media.net revenue is saved by day, so it is not in this list.
+            Same dates as the main report. Media.net revenue is hourly in UTC. Rows saved before this change have the day total only, so pull this date once to fill the hours.
           </p>
         )}
         <div className="report-table">
